@@ -73,15 +73,7 @@ def get_sae_latents(
         latents = latents.cpu().detach().numpy()
         latents_sparse = scipy.sparse.csr_matrix(latents)
         latent_sparse_fpath = f'{latents_dir}{safe_seq_name}-{plm_layer}.npz'
-
-        try:
-            scipy.sparse.save_npz(latent_sparse_fpath, latents_sparse)
-        except:
-            print("RAW seq_name repr:", repr(seq_name))
-            print("SAFE name repr   :", repr(safe_filename(seq_name)))
-            print("OUT path repr    :", repr(str(latent_sparse_fpath)))
-            print("OUT path length  :", len(str(latent_sparse_fpath)))
-
+        scipy.sparse.save_npz(latent_sparse_fpath, latents_sparse)
         print(f'[{i+batch_start}] Saved latents (layer {plm_layer}): {latent_sparse_fpath}')
 
 def chunked(iterable: Sequence, chunk_size: int):
@@ -98,7 +90,7 @@ if __name__=='__main__':
     plm_model = "esm2-650m"
     plm_layer_list = [9, 18, 24, 30, 33]  # Choose ESM layer (1,9,18,24,30,33)
     plm_batch_size = 8
-    seq_batch_size = 16 # 1000
+    seq_batch_size = 1000
     max_length = 1536
     save_idx_in_fname = False
     embeddings_dir = f"{data_folder}{subfolders['protein_embeddings']}{data_subfolder}/"
