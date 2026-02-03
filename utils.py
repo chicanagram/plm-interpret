@@ -1,5 +1,8 @@
 import torch
+import scipy
 import re
+from pathlib import Path
+import time
 
 _WINDOWS_BAD = r'[<>:"/\\|?*]'
 _CONTROL_CHARS = r"[\x00-\x1f\x7f]"  # includes \n \r \t etc.
@@ -11,6 +14,33 @@ def safe_filename(name: str, max_len: int = 120) -> str:
     if not name:
         name = "seq"
     return name[:max_len]
+
+
+def safe_torch_save(tensor, path: Path, retries=3):
+    for attempt in range(retries):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(tensor, path)
+            return
+        except RuntimeError as e:
+            if attempt == retries - 1:
+                raise
+            print(f"Save failed, retrying ({attempt+1}/{retries})...")
+            time.sleep(1)
+
+
+def safe_numpy_save(array, path: Path, retries=3):
+    for attempt in range(retries):
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            scipy.sparse.save_npz(path, array)
+            return
+        except RuntimeError as e:
+            if attempt == retries - 1:
+                raise
+            print(f"Save failed, retrying ({attempt+1}/{retries})...")
+            time.sleep(1)
+
 
 def fetch_sequences_from_fasta(sequence_fpath):
     from Bio import SeqIO
