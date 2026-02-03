@@ -4,7 +4,7 @@ import torch
 import scipy
 from typing import List, Sequence, Tuple
 from variables import address_dict, subfolders
-from utils import fetch_sequences_from_fasta
+from utils import fetch_sequences_from_fasta, get_best_device
 
 def get_esm_embeddings(
         sequences,
@@ -78,6 +78,8 @@ def chunked(iterable: Sequence, chunk_size: int):
         yield start, iterable[start:start + chunk_size]
 
 
+
+
 if __name__=='__main__':
     data_folder = address_dict['plm-interpret-data-ssd'] # address_dict['plm-interpret-data']
     data_subfolder = 'uniprot_sprot90'
@@ -94,7 +96,7 @@ if __name__=='__main__':
     latents_dir = f"{address_dict['plm-interpret-data']}{subfolders['sae_latents']}{data_subfolder}/"
 
     # get device
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = get_best_device()
     device_str = str(device)
 
     # get sequences
