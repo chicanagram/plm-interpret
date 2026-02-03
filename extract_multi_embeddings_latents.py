@@ -98,6 +98,7 @@ if __name__=='__main__':
     # get device
     device = get_best_device()
     device_str = str(device)
+    print('Device:', device_str)
 
     # get sequences
     sequences, seq_names, _ = fetch_sequences_from_fasta(fasta_fpath)
