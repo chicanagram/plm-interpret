@@ -2,11 +2,15 @@ import torch
 import re
 
 _WINDOWS_BAD = r'[<>:"/\\|?*]'
+_CONTROL_CHARS = r"[\x00-\x1f\x7f]"  # includes \n \r \t etc.
 
-def safe_filename(name: str, max_len: int = 150) -> str:
+def safe_filename(name: str, max_len: int = 120) -> str:
+    name = re.sub(_CONTROL_CHARS, "_", name)
     name = re.sub(_WINDOWS_BAD, "_", name)
-    name = name.strip(" .")  # Windows also hates trailing dot/space
-    return name[:max_len] if len(name) > max_len else name
+    name = name.strip(" .")  # Windows forbids trailing space/dot
+    if not name:
+        name = "seq"
+    return name[:max_len]
 
 def fetch_sequences_from_fasta(sequence_fpath):
     from Bio import SeqIO

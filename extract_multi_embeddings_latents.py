@@ -36,9 +36,10 @@ def get_esm_embeddings(
             seq_start_idx = 0
             embeddings_layer = embeddings[layer].to(device)
             for i, (seq, seq_name) in enumerate(zip(sequences, seq_names)):
+                safe_seq_name = safe_filename(seq_name)
                 seq_end_idx = seq_start_idx + min(len(seq),max_length)
                 emb_lyr = embeddings_layer[seq_start_idx:seq_end_idx,:].clone()
-                emb_fpath_torch = f'{embeddings_dir}{safe_filename(seq_name)}-{layer}.pt'
+                emb_fpath_torch = f'{embeddings_dir}{safe_seq_name}-{layer}.pt'
                 torch.save(emb_lyr, emb_fpath_torch)
                 print(f'[{i+batch_start}] Saved embeddings (layer {layer}): {len(seq)} {emb_lyr.shape} {emb_fpath_torch}')
                 # update seq_start_idx
@@ -61,16 +62,26 @@ def get_sae_latents(
     """
     sae = load_sae_from_hf(plm_model=plm_model, plm_layer=plm_layer).to(device)
     for i, seq_name in enumerate(seq_names):
+        safe_seq_name = safe_filename(seq_name)
+
         # get SAE latents
-        emb_fpath = f'{embeddings_dir}{safe_filename(seq_name)}-{plm_layer}.pt'
+        emb_fpath = f'{embeddings_dir}{safe_seq_name}-{plm_layer}.pt'
         embeddings = torch.load(emb_fpath)
         latents = sae.encode(embeddings)
 
         # convert to sparse array in numpy
         latents = latents.cpu().detach().numpy()
         latents_sparse = scipy.sparse.csr_matrix(latents)
-        latent_sparse_fpath = f'{latents_dir}{safe_filename(seq_name)}-{plm_layer}.npz'
-        scipy.sparse.save_npz(latent_sparse_fpath, latents_sparse)
+        latent_sparse_fpath = f'{latents_dir}{safe_seq_name}-{plm_layer}.npz'
+
+        try:
+            scipy.sparse.save_npz(latent_sparse_fpath, latents_sparse)
+        except:
+            print("RAW seq_name repr:", repr(seq_name))
+            print("SAFE name repr   :", repr(safe_filename(seq_name)))
+            print("OUT path repr    :", repr(str(latent_sparse_fpath)))
+            print("OUT path length  :", len(str(latent_sparse_fpath)))
+
         print(f'[{i+batch_start}] Saved latents (layer {plm_layer}): {latent_sparse_fpath}')
 
 def chunked(iterable: Sequence, chunk_size: int):
@@ -87,7 +98,7 @@ if __name__=='__main__':
     plm_model = "esm2-650m"
     plm_layer_list = [9, 18, 24, 30, 33]  # Choose ESM layer (1,9,18,24,30,33)
     plm_batch_size = 8
-    seq_batch_size = 1000
+    seq_batch_size = 16 # 1000
     max_length = 1536
     save_idx_in_fname = False
     embeddings_dir = f"{data_folder}{subfolders['protein_embeddings']}{data_subfolder}/"
