@@ -14,7 +14,8 @@ address_dict = {
     'ECOHARVEST': '../ECOHARVEST/',
     'pips-insilico': '../pips-insilico/data/',
     'databases': '../seq-db/',
-    'plm-interpret-data': '../plm-interpret-data/'
+    'plm-interpret-data': '../plm-interpret-data/',
+    'plm-interpret-data-ssd': 'E:/projects/plm-interpret-data/'
 }
 
 subfolders = {
@@ -32,7 +33,7 @@ subfolders = {
     'patents': 'patents/',
     'seqsearch': 'seqsearch/',
     'protein_embeddings': 'protein_embeddings/',
-    'sae_latents': 'sae_latents',
+    'sae_latents': 'sae_latents/',
     'expdata': 'expdata/',
     'mutagenesis_proposal': 'mutagenesis_proposal/',
     'solubility': 'solubility/',
