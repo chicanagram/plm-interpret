@@ -4,7 +4,7 @@ import torch
 import scipy
 from typing import List, Sequence, Tuple
 from variables import address_dict, subfolders
-from utils import fetch_sequences_from_fasta, get_best_device
+from utils import fetch_sequences_from_fasta, get_best_device, safe_filename
 
 def get_esm_embeddings(
         sequences,
@@ -38,7 +38,7 @@ def get_esm_embeddings(
             for i, (seq, seq_name) in enumerate(zip(sequences, seq_names)):
                 seq_end_idx = seq_start_idx + min(len(seq),max_length)
                 emb_lyr = embeddings_layer[seq_start_idx:seq_end_idx,:].clone()
-                emb_fpath_torch = f'{embeddings_dir}{seq_name}-{layer}.pt'
+                emb_fpath_torch = f'{embeddings_dir}{safe_filename(seq_name)}-{layer}.pt'
                 torch.save(emb_lyr, emb_fpath_torch)
                 print(f'[{i+batch_start}] Saved embeddings (layer {layer}): {len(seq)} {emb_lyr.shape} {emb_fpath_torch}')
                 # update seq_start_idx
@@ -62,22 +62,20 @@ def get_sae_latents(
     sae = load_sae_from_hf(plm_model=plm_model, plm_layer=plm_layer).to(device)
     for i, seq_name in enumerate(seq_names):
         # get SAE latents
-        emb_fpath = f'{embeddings_dir}{seq_name}-{plm_layer}.pt'
+        emb_fpath = f'{embeddings_dir}{safe_filename(seq_name)}-{plm_layer}.pt'
         embeddings = torch.load(emb_fpath)
         latents = sae.encode(embeddings)
 
         # convert to sparse array in numpy
         latents = latents.cpu().detach().numpy()
         latents_sparse = scipy.sparse.csr_matrix(latents)
-        latent_sparse_fpath = f'{latents_dir}{seq_name}-{plm_layer}.npz'
+        latent_sparse_fpath = f'{latents_dir}{safe_filename(seq_name)}-{plm_layer}.npz'
         scipy.sparse.save_npz(latent_sparse_fpath, latents_sparse)
         print(f'[{i+batch_start}] Saved latents (layer {plm_layer}): {latent_sparse_fpath}')
 
 def chunked(iterable: Sequence, chunk_size: int):
     for start in range(0, len(iterable), chunk_size):
         yield start, iterable[start:start + chunk_size]
-
-
 
 
 if __name__=='__main__':
@@ -92,8 +90,8 @@ if __name__=='__main__':
     seq_batch_size = 1000
     max_length = 1536
     save_idx_in_fname = False
-    embeddings_dir = f"{address_dict['plm-interpret-data']}{subfolders['protein_embeddings']}{data_subfolder}/"
-    latents_dir = f"{address_dict['plm-interpret-data']}{subfolders['sae_latents']}{data_subfolder}/"
+    embeddings_dir = f"{data_folder}{subfolders['protein_embeddings']}{data_subfolder}/"
+    latents_dir = f"{data_folder}{subfolders['sae_latents']}{data_subfolder}/"
 
     # get device
     device = get_best_device()

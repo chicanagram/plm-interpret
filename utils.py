@@ -1,4 +1,13 @@
 import torch
+import re
+
+_WINDOWS_BAD = r'[<>:"/\\|?*]'
+
+def safe_filename(name: str, max_len: int = 150) -> str:
+    name = re.sub(_WINDOWS_BAD, "_", name)
+    name = name.strip(" .")  # Windows also hates trailing dot/space
+    return name[:max_len] if len(name) > max_len else name
+
 def fetch_sequences_from_fasta(sequence_fpath):
     from Bio import SeqIO
     sequence_names = []
