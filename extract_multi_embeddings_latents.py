@@ -3,20 +3,25 @@ from interplm.embedders.esm import ESM
 import torch
 import scipy
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Dict
 from variables import address_dict, subfolders
-from utils import fetch_sequences_from_fasta, get_best_device, safe_filename, safe_torch_save, safe_numpy_save
+from utils import (
+    fetch_sequences_from_fasta,
+    get_best_device,
+    safe_torch_save,
+    safe_numpy_save,
+    initialize_batch_metadata_csv,
+    update_batch_metadata_flags,
+    chunked,
+)
 
 def get_esm_embeddings(
         sequences,
-        seq_names,
         model_name,
         layers,
         batch_size=8,
         max_length=2048,
-        embeddings_dir=None,
         device='cpu',
-        batch_start=0
 ):
     """
     Extract ESM2 embeddings from sequences
@@ -30,60 +35,31 @@ def get_esm_embeddings(
     # batch extract embeddings
     esm = ESM(model_name=model_name, max_length=max_length)
     embeddings = esm.extract_embeddings_multiple_layers(sequences=sequences, layers=layers, batch_size=batch_size)
-
-    # save embeddings individually
-    if embeddings_dir is not None:
-        for layer in layers:
-            seq_start_idx = 0
-            embeddings_layer = embeddings[layer].to(device)
-            for i, (seq, seq_name) in enumerate(zip(sequences, seq_names)):
-                safe_seq_name = safe_filename(seq_name)
-                seq_end_idx = seq_start_idx + min(len(seq),max_length)
-                emb_lyr = embeddings_layer[seq_start_idx:seq_end_idx,:].clone()
-                emb_fpath_torch = f'{embeddings_dir}{safe_seq_name}-{layer}.pt'
-                safe_torch_save(emb_lyr, Path(emb_fpath_torch))
-                print(f'[{i+batch_start}] Saved embeddings (layer {layer}): {len(seq)} {emb_lyr.shape} {emb_fpath_torch}')
-                # update seq_start_idx
-                seq_start_idx = seq_end_idx
-    return embeddings
+    return {layer: embeddings[layer].to(device) for layer in layers}
 
 def get_sae_latents(
-        seq_names,
-        embeddings_dir,
+        batch_embeddings: Dict[int, torch.Tensor],
         latents_dir,
-        plm_layer,
+        batch_index,
+        plm_layer_list,
         plm_model='esm2-650m',
         device='cpu',
-        batch_start=0
 ):
     """
-    Load SAE model and extract features
-    :param plm_layer_list:
-    :return:
+    Load SAE models by layer and save batch-concatenated sparse latents.
     """
-    sae = load_sae_from_hf(plm_model=plm_model, plm_layer=plm_layer).to(device)
-    for i, seq_name in enumerate(seq_names):
-        safe_seq_name = safe_filename(seq_name)
-
-        # get SAE latents
-        emb_fpath = f'{embeddings_dir}{safe_seq_name}-{plm_layer}.pt'
-        embeddings = torch.load(emb_fpath)
-        latents = sae.encode(embeddings)
-
-        # convert to sparse array in numpy
+    for plm_layer in plm_layer_list:
+        sae = load_sae_from_hf(plm_model=plm_model, plm_layer=plm_layer).to(device)
+        latents = sae.encode(batch_embeddings[plm_layer])
         latents = latents.cpu().detach().numpy()
         latents_sparse = scipy.sparse.csr_matrix(latents)
-        latent_sparse_fpath = f'{latents_dir}{safe_seq_name}-{plm_layer}.npz'
-        safe_numpy_save(latents_sparse, Path(latent_sparse_fpath))
-        print(f'[{i+batch_start}] Saved latents (layer {plm_layer}): {latent_sparse_fpath}')
-
-def chunked(iterable: Sequence, chunk_size: int):
-    for start in range(0, len(iterable), chunk_size):
-        yield start, iterable[start:start + chunk_size]
+        latent_batch_fpath = f'{latents_dir}batch_{batch_index:06d}-layer_{plm_layer}.npz'
+        safe_numpy_save(latents_sparse, Path(latent_batch_fpath))
+        print(f'Saved batch latents (batch {batch_index}, layer {plm_layer}): {latents_sparse.shape} {latent_batch_fpath}')
 
 
 if __name__=='__main__':
-    data_folder = address_dict['plm-interpret-data-ssd'] # address_dict['plm-interpret-data']
+    data_folder = address_dict['plm-interpret-data-ssd'] # address_dict['plm-interpret-data-ssd'] #
     data_subfolder = 'uniprot_sprot90'
     fasta_fname = 'uniprot_sprot90.fasta'
     fasta_fpath = f'{data_folder}{subfolders["sequences"]}{data_subfolder}/{fasta_fname}'
@@ -91,11 +67,11 @@ if __name__=='__main__':
     plm_model = "esm2-650m"
     plm_layer_list = [9, 18, 24, 30, 33]  # Choose ESM layer (1,9,18,24,30,33)
     plm_batch_size = 8
-    seq_batch_size = 100 # 1000
+    seq_batch_size = 1000
     max_length = 1536
-    save_idx_in_fname = False
     embeddings_dir = f"{data_folder}{subfolders['protein_embeddings']}{data_subfolder}/"
     latents_dir = f"{data_folder}{subfolders['sae_latents']}{data_subfolder}/"
+    metadata_csv_fpath = f"{data_folder}{subfolders['protein_embeddings']}{data_subfolder}/batch_sequence_index.csv"
 
     # get device
     device = get_best_device()
@@ -105,36 +81,50 @@ if __name__=='__main__':
     # get sequences
     sequences, seq_names, _ = fetch_sequences_from_fasta(fasta_fpath)
     print(f'{len(sequences)} sequences total.')
+    initialize_batch_metadata_csv(
+        sequences=sequences,
+        seq_names=seq_names,
+        seq_batch_size=seq_batch_size,
+        max_length=max_length,
+        csv_fpath=metadata_csv_fpath
+    )
+    print(f'Metadata CSV created: {metadata_csv_fpath}')
 
     for batch_start, batch_seqs in chunked(sequences, seq_batch_size):
-        batch_names_raw = seq_names[batch_start:batch_start + len(batch_seqs)]
-        if save_idx_in_fname:
-            batch_names = [f"{batch_start + i:08d}_{name}" for i, name in enumerate(batch_names_raw)]
-        else:
-            batch_names = batch_names_raw.copy()
-        print(f"\nBatch {batch_start}–{batch_start + len(batch_seqs) - 1} ({len(batch_seqs)} seqs)")
+        batch_index = batch_start // seq_batch_size
+        processed_seq_indices = range(batch_start, batch_start + len(batch_seqs))
+        print(f"\nBatch {batch_index} ({batch_start}–{batch_start + len(batch_seqs) - 1}, {len(batch_seqs)} seqs)")
 
-        # 1) ESM embeddings (saves per-seq .pt files into embeddings_dir)
-        _ = get_esm_embeddings(
+        # 1) ESM embeddings (save one concatenated tensor per layer per batch)
+        batch_embeddings = get_esm_embeddings(
             sequences=batch_seqs,
-            seq_names=batch_names,
             model_name=model_name,
             layers=plm_layer_list,
             batch_size=plm_batch_size,
             max_length=max_length,
-            embeddings_dir=embeddings_dir,
             device=device_str,
-            batch_start=batch_start
+        )
+        for plm_layer in plm_layer_list:
+            emb_batch_fpath = f'{embeddings_dir}batch_{batch_index:06d}-layer_{plm_layer}.pt'
+            safe_torch_save(batch_embeddings[plm_layer].cpu(), Path(emb_batch_fpath))
+            print(f'Saved batch embeddings (batch {batch_index}, layer {plm_layer}): {tuple(batch_embeddings[plm_layer].shape)} {emb_batch_fpath}')
+        update_batch_metadata_flags(
+            metadata_csv_fpath,
+            processed_seq_indices=processed_seq_indices,
+            embedding_obtained=True
         )
 
-        # 2) SAE latents (reads those .pt files and writes latents)
-        for plm_layer in plm_layer_list:
-            get_sae_latents(
-                seq_names=batch_names,
-                embeddings_dir=embeddings_dir,
-                latents_dir=latents_dir,
-                plm_layer=plm_layer,
-                plm_model="esm2-650m",
-                device=device_str,
-                batch_start=batch_start
-            )
+        # 2) SAE latents (save one concatenated sparse matrix per layer per batch)
+        get_sae_latents(
+            batch_embeddings=batch_embeddings,
+            latents_dir=latents_dir,
+            batch_index=batch_index,
+            plm_layer_list=plm_layer_list,
+            plm_model=plm_model,
+            device=device_str,
+        )
+        update_batch_metadata_flags(
+            metadata_csv_fpath,
+            processed_seq_indices=processed_seq_indices,
+            latent_obtained=True
+        )
