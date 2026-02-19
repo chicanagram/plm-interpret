@@ -87,3 +87,106 @@ def get_sequence_metadata_row(csv_fpath: str, seq_index: int) -> Dict[str, str]:
     if row is None:
         raise ValueError(f"Sequence index {seq_index} not found in metadata CSV: {csv_fpath}")
     return row
+
+
+def get_batch_progress(csv_fpath: str, processed_seq_indices) -> Dict[str, bool]:
+    """
+    Return whether all provided sequence indices have embedding/latent flags set.
+    """
+    processed_seq_indices = set(int(i) for i in processed_seq_indices)
+    if not processed_seq_indices:
+        return {"all_embedding_obtained": True, "all_latent_obtained": True}
+
+    embedding_flags = []
+    latent_flags = []
+    with open(csv_fpath, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if int(row["seq_index"]) in processed_seq_indices:
+                embedding_flags.append(int(row["embedding_obtained"]) == 1)
+                latent_flags.append(int(row["latent_obtained"]) == 1)
+
+    if len(embedding_flags) != len(processed_seq_indices):
+        raise ValueError("Some processed sequence indices were not found in metadata CSV.")
+
+    return {
+        "all_embedding_obtained": all(embedding_flags),
+        "all_latent_obtained": all(latent_flags),
+    }
+
+
+def validate_metadata_csv(
+        sequences: Sequence[str],
+        seq_names: Sequence[str],
+        seq_batch_size: int,
+        max_length: int,
+        csv_fpath: str,
+):
+    """
+    Validate existing metadata CSV matches the current FASTA order/content and batching params.
+    Raises ValueError on mismatch.
+    """
+    required_fields = [
+        "seq_index",
+        "seq_name",
+        "batch_index",
+        "sequence_length",
+        "used_length",
+        "batch_start_row",
+        "embedding_obtained",
+        "latent_obtained",
+    ]
+    with open(csv_fpath, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"Metadata CSV has no header: {csv_fpath}")
+        missing_fields = [c for c in required_fields if c not in reader.fieldnames]
+        if missing_fields:
+            raise ValueError(f"Metadata CSV missing required columns {missing_fields}: {csv_fpath}")
+        rows = list(reader)
+
+    if len(rows) != len(sequences):
+        raise ValueError(
+            f"Metadata CSV row count mismatch for resume: csv_rows={len(rows)} fasta_sequences={len(sequences)}"
+        )
+
+    for batch_start, batch_seqs in chunked(sequences, seq_batch_size):
+        batch_index = batch_start // seq_batch_size
+        expected_start_row = 0
+        for i, seq in enumerate(batch_seqs):
+            seq_index = batch_start + i
+            row = rows[seq_index]
+
+            if int(row["seq_index"]) != seq_index:
+                raise ValueError(
+                    f"Metadata CSV seq_index mismatch at row {seq_index}: "
+                    f"csv={row['seq_index']} expected={seq_index}"
+                )
+            if row["seq_name"] != seq_names[seq_index]:
+                raise ValueError(
+                    f"Metadata CSV seq_name mismatch at seq_index={seq_index}: "
+                    f"csv={row['seq_name']} expected={seq_names[seq_index]}"
+                )
+            if int(row["batch_index"]) != batch_index:
+                raise ValueError(
+                    f"Metadata CSV batch_index mismatch at seq_index={seq_index}: "
+                    f"csv={row['batch_index']} expected={batch_index}"
+                )
+            if int(row["sequence_length"]) != len(seq):
+                raise ValueError(
+                    f"Metadata CSV sequence_length mismatch at seq_index={seq_index}: "
+                    f"csv={row['sequence_length']} expected={len(seq)}"
+                )
+
+            expected_used_length = min(len(seq), max_length)
+            if int(row["used_length"]) != expected_used_length:
+                raise ValueError(
+                    f"Metadata CSV used_length mismatch at seq_index={seq_index}: "
+                    f"csv={row['used_length']} expected={expected_used_length}"
+                )
+            if int(row["batch_start_row"]) != expected_start_row:
+                raise ValueError(
+                    f"Metadata CSV batch_start_row mismatch at seq_index={seq_index}: "
+                    f"csv={row['batch_start_row']} expected={expected_start_row}"
+                )
+            expected_start_row += expected_used_length
