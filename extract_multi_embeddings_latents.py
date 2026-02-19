@@ -60,8 +60,8 @@ def get_sae_latents(
 
 if __name__=='__main__':
     data_folder = address_dict['plm-interpret-data-ssd'] # address_dict['plm-interpret-data-ssd'] #
-    data_subfolder = 'uniprot_sprot90'
-    fasta_fname = 'uniprot_sprot90.fasta'
+    data_subfolder = 'uniprot_sprot80'
+    fasta_fname = 'uniprot_sprot80.fasta'
     fasta_fpath = f'{data_folder}{subfolders["sequences"]}{data_subfolder}/{fasta_fname}'
     model_name = "facebook/esm2_t33_650M_UR50D"
     plm_model = "esm2-650m"
