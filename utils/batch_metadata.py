@@ -1,4 +1,7 @@
 import csv
+import os
+import stat
+import time
 from pathlib import Path
 from typing import Sequence, Dict
 
@@ -74,10 +77,11 @@ def update_batch_metadata_flags(
         if latent_obtained is not None:
             row["latent_obtained"] = int(latent_obtained)
 
-    with open(csv_fpath, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    _write_csv_rows_atomic_with_retries(
+        csv_fpath=csv_fpath,
+        fieldnames=fieldnames,
+        rows=rows,
+    )
 
 
 def get_sequence_metadata_row(csv_fpath: str, seq_index: int) -> Dict[str, str]:
@@ -113,6 +117,49 @@ def get_batch_progress(csv_fpath: str, processed_seq_indices) -> Dict[str, bool]
         "all_embedding_obtained": all(embedding_flags),
         "all_latent_obtained": all(latent_flags),
     }
+
+
+def _write_csv_rows_atomic_with_retries(
+        csv_fpath: str,
+        fieldnames,
+        rows,
+        retries: int = 5,
+        sleep_seconds: float = 1.0,
+):
+    """
+    Write CSV via temp file + atomic replace.
+    Retries permission errors (e.g. transient lock), and attempts to add user write bit.
+    """
+    csv_path = Path(csv_fpath)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = csv_path.with_suffix(csv_path.suffix + ".tmp")
+
+    for attempt in range(retries):
+        try:
+            with open(tmp_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(rows)
+            os.replace(tmp_path, csv_path)
+            return
+        except PermissionError as exc:
+            try:
+                current_mode = csv_path.stat().st_mode
+                csv_path.chmod(current_mode | stat.S_IWUSR)
+            except Exception:
+                pass
+            if attempt == retries - 1:
+                raise PermissionError(
+                    f"Could not update metadata CSV due to permission denial: {csv_fpath}. "
+                    f"Close any editor/spreadsheet using it and ensure write permission."
+                ) from exc
+            time.sleep(sleep_seconds)
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
 
 
 def validate_metadata_csv(
